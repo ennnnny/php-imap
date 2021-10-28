@@ -1,20 +1,19 @@
 {
-    "name": "webklex/php-imap",
+    "name": "ennnnny/php-imap",
     "type": "library",
     "description": "PHP IMAP client",
     "keywords": [
-        "webklex",
         "imap",
         "pop3",
         "php-imap",
         "mail"
     ],
-    "homepage": "https://github.com/webklex/php-imap",
+    "homepage": "https://github.com/ennnnny/php-imap",
     "license": "MIT",
     "authors": [
         {
-            "name": "Malte Goldenbaum",
-            "email": "github@webklex.com",
+            "name": "ennnnny",
+            "email": "kuye1130@gmail.com",
             "role": "Developer"
         }
     ],
