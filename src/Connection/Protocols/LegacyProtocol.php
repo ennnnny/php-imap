@@ -180,7 +180,8 @@ class LegacyProtocol extends Protocol {
      * @throws RuntimeException
      */
     public function selectFolder($folder = 'INBOX') {
-        \imap_reopen($this->stream, $folder, IMAP::OP_READONLY, 3);
+        $folder_address = $this->getAddress().$folder;
+        \imap_reopen($this->stream, $folder_address, 0, 3);
         return $this->examineFolder($folder);
     }
 
