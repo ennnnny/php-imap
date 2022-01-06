@@ -173,7 +173,8 @@ class Header {
      * @return string|null
      */
     public function getBoundary(){
-        $boundary = $this->find("/boundary\=(.*)/i");
+        $regex = isset($this->config["boundary"]) ? $this->config["boundary"] : "/boundary=(.*?(?=;)|(.*))/i";
+        $boundary = $this->find($regex);
 
         if ($boundary === null) {
             return null;
@@ -733,7 +734,8 @@ class Header {
                 try{
                     $parsed_date = Carbon::parse($date);
                 } catch (\Exception $_e) {
-                    throw new InvalidMessageDateException("Invalid message date. ID:".$this->get("message_id"), 1100, $e);
+                    $error_message = "Invalid message date. ID:".$this->get("message_id")." Date:".$header->date."/".$date;
+                    throw new InvalidMessageDateException($error_message, 1100, $e);
                 }
             }
 
