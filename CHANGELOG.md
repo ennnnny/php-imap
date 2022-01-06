@@ -6,7 +6,8 @@ Updates should follow the [Keep a CHANGELOG](http://keepachangelog.com/) princip
 
 ## [UNRELEASED]
 ### Fixed
-- NaN
+- Fix attribute serialization #179 (thanks @netpok)
+- Use real tls instead of starttls #180 (thanks @netpok)
 
 ### Added
 - NaN
@@ -16,6 +17,35 @@ Updates should follow the [Keep a CHANGELOG](http://keepachangelog.com/) princip
 
 ### Breaking changes
 - NaN
+
+## [3.0.0-alpha] - 2021-11-04
+### Fixed
+- Extend date parsing error message #173
+- Fixed 'Where' method replaces the content with uppercase #148
+- Don't surround numeric search values with quotes
+- Context added to `InvalidWhereQueryCriteriaException` 
+- Redundant `stream_set_timeout()` removed
+
+### Added
+- Make boundary regex configurable #169 #150 #126 #121 #111 #152 #108 (thanks @EthraZa)
+- IMAP ID support added #174
+- Enable debug mode via config
+- Custom UID alternative support added
+- Fetch additional extensions using `Folder::query(["FEATURE_NAME"])`
+- Optionally move a message during "deletion" instead of just "flagging" it #106 (thanks @EthraZa)
+- `WhereQuery::where()` accepts now a wide range of criteria / values. #104
+
+### Affected Classes
+- [Header::class](src/Header.php)
+- [Protocol::class](src/Connection/Protocols/Protocol.php)
+- [Query::class](src/Query/Query.php)
+- [WhereQuery::class](src/Query/WhereQuery.php)
+- [Message::class](src/Message.php)
+
+### Breaking changes
+- All protocol methods which had a `boolean` `$uid` option no longer support a boolean. Use `IMAP::ST_UID` or `IMAP::NIL` instead. If you want to use an alternative to `UID` just use the string instead.
+- Default config option `options.sequence` changed from `IMAP::ST_MSGN` to `IMAP::ST_UID`.
+- `Folder::query()` no longer accepts a charset string. It has been replaced by an extension array, which provides the ability to automatically fetch additional features.
 
 ## [2.7.2] - 2021-09-27
 ### Fixed

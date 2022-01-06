@@ -13,7 +13,6 @@
 namespace Webklex\PHPIMAP;
 
 use ErrorException;
-use Exception;
 use Webklex\PHPIMAP\Connection\Protocols\ImapProtocol;
 use Webklex\PHPIMAP\Connection\Protocols\LegacyProtocol;
 use Webklex\PHPIMAP\Connection\Protocols\Protocol;
@@ -66,7 +65,7 @@ class Client {
 
     /**
      * Server encryption.
-     * Supported: none, ssl, tls, or notls.
+     * Supported: none, ssl, tls, starttls or notls.
      *
      * @var string
      */
@@ -111,6 +110,13 @@ class Client {
     public $password;
 
     /**
+     * Additional data fetched from the server.
+     *
+     * @var string
+     */
+    public $extensions;
+
+    /**
      * Account authentication method.
      *
      * @var string
@@ -152,6 +158,7 @@ class Client {
         'username' => '',
         'password' => '',
         'authentication' => null,
+        "extensions" => [],
         'proxy' => [
             'socket' => null,
             'request_fulluri' => false,
@@ -344,6 +351,10 @@ class Client {
                 $protocol = substr($protocol, 7);
             }
             $this->connection->setProtocol($protocol);
+        }
+
+        if (ClientManager::get('options.debug')) {
+            $this->connection->enableDebug();
         }
 
         try {
@@ -544,6 +555,21 @@ class Client {
      */
     public function getFolderPath(){
         return $this->active_folder;
+    }
+
+    /**
+     * Exchange identification information
+     * Ref.: https://datatracker.ietf.org/doc/html/rfc2971
+     *
+     * @param null|array $ids
+     * @return array|bool|void|null
+     *
+     * @throws ConnectionFailedException
+     * @throws Exceptions\RuntimeException
+     */
+    public function Id($ids = null) {
+        $this->checkConnection();
+        return $this->connection->ID($ids);
     }
 
     /**

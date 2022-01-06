@@ -19,6 +19,7 @@ use Webklex\PHPIMAP\Exceptions\InvalidMessageDateException;
 use Webklex\PHPIMAP\Exceptions\MessageNotFoundException;
 use Webklex\PHPIMAP\Exceptions\RuntimeException;
 use Webklex\PHPIMAP\Header;
+use Webklex\PHPIMAP\IMAP;
 
 /**
  * Class ImapProtocol
@@ -59,12 +60,12 @@ class ImapProtocol extends Protocol {
      */
     public function connect($host, $port = null) {
         $transport = 'tcp';
-        $encryption = "";
+        $encryption = '';
 
         if ($this->encryption) {
             $encryption = strtolower($this->encryption);
-            if ($encryption == "ssl") {
-                $transport = 'ssl';
+            if (in_array($encryption, ['ssl', 'tls'])) {
+                $transport = $encryption;
                 $port = $port === null ? 993 : $port;
             }
         }
@@ -74,8 +75,8 @@ class ImapProtocol extends Protocol {
             if (!$this->assumedNextLine('* OK')) {
                 throw new ConnectionFailedException('connection refused');
             }
-            if ($encryption == "tls") {
-                $this->enableTls();
+            if ($encryption == 'starttls') {
+                $this->enableStartTls();
             }
         } catch (Exception $e) {
             throw new ConnectionFailedException('connection failed', 0, $e);
@@ -88,7 +89,7 @@ class ImapProtocol extends Protocol {
      * @throws ConnectionFailedException
      * @throws RuntimeException
      */
-    protected function enableTls(){
+    protected function enableStartTls(){
         $response = $this->requestAndResponse('STARTTLS');
         $result = $response && stream_socket_enable_crypto($this->stream, true, $this->getCryptoMethod());
         if (!$result) {
@@ -532,7 +533,8 @@ class ImapProtocol extends Protocol {
      * @param int|array $from message for items or start message if $to !== null
      * @param int|null $to if null only one message ($from) is fetched, else it's the
      *                             last message, INF means last message available
-     * @param bool $uid set to true if passing a unique id
+     * @param int|string $uid set to IMAP::ST_UID or any string representing the UID - set to IMAP::ST_MSGN to use
+     * message numbers instead.
      *
      * @return string|array if only one item of one message is fetched it's returned as string
      *                      if items of one message are fetched it's returned as (name => value)
@@ -540,7 +542,7 @@ class ImapProtocol extends Protocol {
      *                      if items of messages are fetched it's returned as (msgno => (name => value))
      * @throws RuntimeException
      */
-    protected function fetch($items, $from, $to = null, $uid = false) {
+    public function fetch($items, $from, $to = null, $uid = IMAP::ST_UID) {
         if (is_array($from)) {
             $set = implode(',', $from);
         } elseif ($to === null) {
@@ -554,8 +556,7 @@ class ImapProtocol extends Protocol {
         $items = (array)$items;
         $itemList = $this->escapeList($items);
 
-        $this->sendRequest(($uid ? 'UID ' : '') . 'FETCH', [$set, $itemList], $tag);
-
+        $this->sendRequest($this->buildUIDCommand("FETCH", $uid), [$set, $itemList], $tag);
         $result = [];
         $tokens = null; // define $tokens variable before first use
         while (!$this->readLine($tokens, $tag)) {
@@ -632,12 +633,13 @@ class ImapProtocol extends Protocol {
      * Fetch message headers
      * @param array|int $uids
      * @param string $rfc
-     * @param bool $uid set to true if passing a unique id
+     * @param int|string $uid set to IMAP::ST_UID or any string representing the UID - set to IMAP::ST_MSGN to use
+     * message numbers instead.
      *
      * @return array
      * @throws RuntimeException
      */
-    public function content($uids, $rfc = "RFC822", $uid = false) {
+    public function content($uids, $rfc = "RFC822", $uid = IMAP::ST_UID) {
         return $this->fetch(["$rfc.TEXT"], $uids, null, $uid);
     }
 
@@ -645,24 +647,26 @@ class ImapProtocol extends Protocol {
      * Fetch message headers
      * @param array|int $uids
      * @param string $rfc
-     * @param bool $uid set to true if passing a unique id
+     * @param int|string $uid set to IMAP::ST_UID or any string representing the UID - set to IMAP::ST_MSGN to use
+     * message numbers instead.
      *
      * @return array
      * @throws RuntimeException
      */
-    public function headers($uids, $rfc = "RFC822", $uid = false){
+    public function headers($uids, $rfc = "RFC822", $uid = IMAP::ST_UID){
         return $this->fetch(["$rfc.HEADER"], $uids, null, $uid);
     }
 
     /**
      * Fetch message flags
      * @param array|int $uids
-     * @param bool $uid set to true if passing a unique id
+     * @param int|string $uid set to IMAP::ST_UID or any string representing the UID - set to IMAP::ST_MSGN to use
+     * message numbers instead.
      *
      * @return array
      * @throws RuntimeException
      */
-    public function flags($uids, $uid = false){
+    public function flags($uids, $uid = IMAP::ST_UID){
         return $this->fetch(["FLAGS"], $uids, null, $uid);
     }
 
@@ -741,36 +745,28 @@ class ImapProtocol extends Protocol {
      *                             last message, INF means last message available
      * @param string|null $mode '+' to add flags, '-' to remove flags, everything else sets the flags as given
      * @param bool $silent if false the return values are the new flags for the wanted messages
-     * @param bool $uid set to true if passing a unique id
+     * @param int|string $uid set to IMAP::ST_UID or any string representing the UID - set to IMAP::ST_MSGN to use
+     * message numbers instead.
+     * @param null|string $item command used to store a flag
      *
      * @return bool|array new flags if $silent is false, else true or false depending on success
      * @throws RuntimeException
      */
-    public function store(array $flags, $from, $to = null, $mode = null, $silent = true, $uid = false) {
-        $item = 'FLAGS';
-        if ($mode == '+' || $mode == '-') {
-            $item = $mode . $item;
-        }
-        if ($silent) {
-            $item .= '.SILENT';
-        }
-
+    public function store(array $flags, $from, $to = null, $mode = null, $silent = true, $uid = IMAP::ST_UID, $item = null) {
         $flags = $this->escapeList($flags);
-        $set = (int)$from;
-        if ($to !== null) {
-            $set .= ':' . ($to == INF ? '*' : (int)$to);
-        }
+        $set = $this->buildSet($from, $to);
 
-        $command = ($uid ? "UID " : "")."STORE";
-        $result = $this->requestAndResponse($command, [$set, $item, $flags], $silent);
+        $command = $this->buildUIDCommand("STORE", $uid);
+        $item = ($mode == '-' ? "-" : "+").($item === null ? "FLAGS" : $item).($silent ? '.SILENT' : "");
+
+        $response = $this->requestAndResponse($command, [$set, $item, $flags], $silent);
 
         if ($silent) {
-            return (bool)$result;
+            return (bool)$response;
         }
 
-        $tokens = $result;
         $result = [];
-        foreach ($tokens as $token) {
+        foreach ($response as $token) {
             if ($token[1] != 'FETCH' || $token[2][0] != 'FLAGS') {
                 continue;
             }
@@ -810,18 +806,15 @@ class ImapProtocol extends Protocol {
      * @param $from
      * @param int|null $to if null only one message ($from) is fetched, else it's the
      *                         last message, INF means last message available
-     * @param bool $uid set to true if passing a unique id
+     * @param int|string $uid set to IMAP::ST_UID or any string representing the UID - set to IMAP::ST_MSGN to use
+     * message numbers instead.
      *
      * @return bool success
      * @throws RuntimeException
      */
-    public function copyMessage($folder, $from, $to = null, $uid = false) {
-        $set = (int)$from;
-        if ($to !== null) {
-            $set .= ':' . ($to == INF ? '*' : (int)$to);
-        }
-        $command = ($uid ? "UID " : "")."COPY";
-
+    public function copyMessage($folder, $from, $to = null, $uid = IMAP::ST_UID) {
+        $set = $this->buildSet($from, $to);
+        $command = $this->buildUIDCommand("COPY", $uid);
         return $this->requestAndResponse($command, [$set, $this->escapeString($folder)], true);
     }
 
@@ -830,13 +823,14 @@ class ImapProtocol extends Protocol {
      *
      * @param array<string> $messages List of message identifiers
      * @param string $folder Destination folder
-     * @param bool $uid Set to true if you pass message unique identifiers instead of numbers
+     * @param int|string $uid set to IMAP::ST_UID or any string representing the UID - set to IMAP::ST_MSGN to use
+     * message numbers instead.
      * @return array|bool Tokens if operation successful, false if an error occurred
      *
      * @throws RuntimeException
      */
-    public function copyManyMessages($messages, $folder, $uid = false) {
-        $command = $uid ? 'UID COPY' : 'COPY';
+    public function copyManyMessages($messages, $folder, $uid = IMAP::ST_UID) {
+        $command = $this->buildUIDCommand("COPY", $uid);
 
         $set = implode(',', $messages);
         $tokens = [$set, $this->escapeString($folder)];
@@ -850,38 +844,58 @@ class ImapProtocol extends Protocol {
      * @param $from
      * @param int|null $to if null only one message ($from) is fetched, else it's the
      *                         last message, INF means last message available
-     * @param bool $uid set to true if passing a unique id
+     * @param int|string $uid set to IMAP::ST_UID or any string representing the UID - set to IMAP::ST_MSGN to use
+     * message numbers instead.
      *
      * @return bool success
      * @throws RuntimeException
      */
-    public function moveMessage($folder, $from, $to = null, $uid = false) {
-        $set = (int)$from;
-        if ($to !== null) {
-            $set .= ':' . ($to == INF ? '*' : (int)$to);
-        }
-        $command = ($uid ? "UID " : "")."MOVE";
+    public function moveMessage($folder, $from, $to = null, $uid = IMAP::ST_UID) {
+        $set = $this->buildSet($from, $to);
+        $command = $this->buildUIDCommand("MOVE", $uid);
 
         return $this->requestAndResponse($command, [$set, $this->escapeString($folder)], true);
     }
 
     /**
      * Move multiple messages to the target folder
-     *
      * @param array<string> $messages List of message identifiers
      * @param string $folder Destination folder
-     * @param bool $uid Set to true if you pass message unique identifiers instead of numbers
-     * @return array|bool Tokens if operation successful, false if an error occurred
+     * @param int|string $uid set to IMAP::ST_UID or any string representing the UID - set to IMAP::ST_MSGN to use
+     * message numbers instead.
      *
+     * @return array|bool Tokens if operation successful, false if an error occurred
      * @throws RuntimeException
      */
-    public function moveManyMessages($messages, $folder, $uid = false) {
-        $command = $uid ? 'UID MOVE' : 'MOVE';
+    public function moveManyMessages($messages, $folder, $uid = IMAP::ST_UID) {
+        $command = $this->buildUIDCommand("MOVE", $uid);
 
         $set = implode(',', $messages);
         $tokens = [$set, $this->escapeString($folder)];
 
         return $this->requestAndResponse($command, $tokens, true);
+    }
+
+    /**
+     * Exchange identification information
+     * Ref.: https://datatracker.ietf.org/doc/html/rfc2971
+     *
+     * @param null $ids
+     * @return array|bool|void|null
+     *
+     * @throws RuntimeException
+     */
+    public function ID($ids = null) {
+        $token = "NIL";
+        if (is_array($ids) && !empty($ids)) {
+            $token = "(";
+            foreach ($ids as $id) {
+                $token .= '"'.$id.'" ';
+            }
+            $token = rtrim($token).")";
+        }
+
+        return $this->requestAndResponse("ID", [$token], true);
     }
 
     /**
@@ -1008,14 +1022,15 @@ class ImapProtocol extends Protocol {
     /**
      * Search for matching messages
      * @param array $params
-     * @param bool $uid set to true if passing a unique id
+     * @param int|string $uid set to IMAP::ST_UID or any string representing the UID - set to IMAP::ST_MSGN to use
+     * message numbers instead.
      *
      * @return array message ids
      * @throws RuntimeException
      */
-    public function search(array $params, $uid = false) {
-        $token = $uid == true ? "UID SEARCH" : "SEARCH";
-        $response = $this->requestAndResponse($token, $params);
+    public function search(array $params, $uid = IMAP::ST_UID) {
+        $command = $this->buildUIDCommand("SEARCH", $uid);
+        $response = $this->requestAndResponse($command, $params);
         if (!$response) {
             return $response;
         }
@@ -1032,14 +1047,15 @@ class ImapProtocol extends Protocol {
     /**
      * Get a message overview
      * @param string $sequence
-     * @param bool $uid set to true if passing a unique id
+     * @param int|string $uid set to IMAP::ST_UID or any string representing the UID - set to IMAP::ST_MSGN to use
+     * message numbers instead.
      *
      * @return array
      * @throws RuntimeException
      * @throws MessageNotFoundException
      * @throws InvalidMessageDateException
      */
-    public function overview($sequence, $uid = false) {
+    public function overview($sequence, $uid = IMAP::ST_UID) {
         $result = [];
         list($from, $to) = explode(":", $sequence);
 
@@ -1070,5 +1086,20 @@ class ImapProtocol extends Protocol {
      */
     public function disableDebug(){
         $this->debug = false;
+    }
+
+    /**
+     * Build a valid UID number set
+     * @param $from
+     * @param null $to
+     *
+     * @return int|string
+     */
+    public function buildSet($from, $to = null) {
+        $set = (int)$from;
+        if ($to !== null) {
+            $set .= ':' . ($to == INF ? '*' : (int)$to);
+        }
+        return $set;
     }
 }
